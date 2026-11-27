@@ -219,9 +219,10 @@ test('CJS version and default export are correct', () => {
   assert.equal(cjs.default.SEMVERCAGE_VERSION, '1.0.0');
   assert.equal(esm.default.SEMVERCAGE_VERSION, '1.0.0');
 });
-test('package has zero runtime and development dependencies', () => {
+test('package has zero runtime dependencies and only the pinned fuzz development dependency', () => {
   assert.deepEqual(pkg.dependencies, {});
-  assert.deepEqual(pkg.devDependencies, {});
+  assert.deepEqual(Object.keys(pkg.devDependencies), ['fast-check']);
+  assert.match(pkg.devDependencies['fast-check'], /^\d+\.\d+\.\d+$/);
 });
 test('package exports ESM CJS and types correctly', () => {
   assert.equal(pkg.exports['.'].import, './src/index.mjs');

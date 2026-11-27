@@ -9,7 +9,8 @@ const errors = [];
 
 if (packageJson.name !== 'semvercage') errors.push('package name is not semvercage');
 if (Object.keys(packageJson.dependencies || {}).length !== 0) errors.push('runtime dependencies are not empty');
-if (Object.keys(packageJson.devDependencies || {}).length !== 0) errors.push('devDependencies are not empty');
+const devDependencyNames = Object.keys(packageJson.devDependencies || {});
+if (devDependencyNames.length !== 1 || devDependencyNames[0] !== 'fast-check') errors.push('development dependencies are not limited to fast-check');
 if (!packageJson.exports || packageJson.exports['.'].import !== './src/index.mjs') errors.push('ESM export is incorrect');
 if (!packageJson.exports || packageJson.exports['.'].require !== './dist/cjs/index.cjs') errors.push('CJS export is incorrect');
 if (!packageJson.exports || packageJson.exports['.'].types !== './types/index.d.ts') errors.push('types export is incorrect');

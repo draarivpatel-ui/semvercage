@@ -4,7 +4,7 @@ Contributions are welcome for correctness, security coverage, documentation, and
 
 ## Rules
 
-- Keep runtime dependencies and development dependencies empty.
+- Keep runtime dependencies empty. Keep development dependencies limited to the pinned fast-check property-testing library.
 - Preserve strict SemVer 2.0.0 behavior.
 - Keep parsing linear and explicitly bounded.
 - Do not add dynamically constructed regular expressions.

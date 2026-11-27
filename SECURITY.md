@@ -1,41 +1,41 @@
-# Security policy
+# Security Policy
 
 ## Supported versions
 
 | Version | Supported |
 | --- | --- |
-| 1.0.x | yes |
+| 1.x | Yes |
+| < 1.0 | No |
 
 ## Reporting a vulnerability
 
-Do not open a public issue for a vulnerability that can affect downstream users. Report it through the repository's private security advisory flow on GitHub.
+Use the private GitHub Security Advisories form: [Report a vulnerability](https://github.com/draarivpatel-ui/semvercage/security/advisories/new). Do not open a public issue, pull request, or discussion with exploit details, secrets, private endpoints, or personal data.
 
-Include:
+Include the affected version, a minimal input or lockfile fixture, whether the issue concerns parsing, range evaluation, manifest auditing, lockfile auditing, upgrade auditing, or the CLI, the expected security result, and the actual result.
 
-- the affected version
-- a minimal input or lockfile fixture
-- whether the issue concerns parsing, range evaluation, manifest auditing, lockfile auditing, upgrade auditing, or the CLI
-- the expected security result and the actual result
-- whether the issue has a proof of concept that should remain private during triage
+## Disclosure timeline
+
+We acknowledge reports within 48 hours. We aim to confirm or reject the report within 7 days, prepare a fix as soon as practical, and coordinate public disclosure with the reporter. Unless a shorter deadline is required by an actively exploited issue, please allow up to 90 days for a coordinated fix and disclosure.
 
 ## Scope
 
 In scope:
 
-- parser denial of service or complexity bypasses
-- incorrect SemVer precedence or range matching with security impact
-- missed detection for documented dependency specifier attacks
-- prototype pollution keys, inherited properties, accessor execution, and cyclic object handling
-- lockfile integrity, registry, install script, or version mismatch bypasses
+- Parser denial of service or complexity bypasses
+- Incorrect SemVer precedence or range matching with security impact
+- Missed detection for documented dependency specifier attacks
+- Prototype pollution keys, inherited properties, accessor execution, and cyclic object handling
+- Lockfile integrity, registry, install script, or version mismatch bypasses
 - CLI output injection or uncaught hostile-input failures
 
-Out of scope:
+## Out of scope
 
-- attacks requiring write access to the repository or victim machine
-- registry compromise that cannot be detected from static manifest or lockfile data
-- package manager behavior outside npm-compatible manifests and package-lock v2 or v3 files
-- vulnerabilities in downstream projects that do not apply the returned policy result
+Attacks requiring write access to the repository or victim machine, registry compromise that cannot be detected from static manifest or lockfile data, package manager behavior outside npm-compatible manifests and package-lock v2 or v3 files, and downstream projects that ignore a blocking policy result are out of scope.
 
-## Hardening expectations
+## Hardening notes
 
-Inputs are bounded before parsing. Consumers should still enforce their own size limits when reading files from untrusted network input. A report with `ok: false` must block the operation in the caller. A report with `ok: true` does not prove a package is safe; it means the static firewall found no policy-blocking signal.
+The package has zero runtime dependencies. Input budgets, fail-closed validation, deterministic tests, and property-based fuzz tests are part of the maintenance bar. A report that the library marks unsafe must block the operation in the caller; audit output is a boundary signal, not proof that a downstream system is safe.
+
+## Disclosure history
+
+No published advisories yet. Fixed versions will be listed here with their advisory links.

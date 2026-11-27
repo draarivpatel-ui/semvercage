@@ -1,5 +1,7 @@
 # semvercage
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/draarivpatel-ui/semvercage/badge)](https://scorecard.dev/viewer/?uri=github.com/draarivpatel-ui/semvercage)
+
 `semvercage` is a zero-dependency supply-chain firewall for npm packages. It combines a strict bounded SemVer 2.0.0 parser, a safe range evaluator, dependency specifier auditing, `package.json` lifecycle checks, `package-lock.json` integrity checks, and version upgrade guards.
 
 The library is designed for security automation, CI gates, package manager wrappers, registry proxies, and maintainer tooling that must treat dependency input as hostile.
@@ -19,7 +21,7 @@ The library is designed for security automation, CI gates, package manager wrapp
 - Upgrade auditing for downgrades, unexpected major jumps, stable to prerelease transitions, prerelease channel movement, and build-metadata-only substitution.
 - Structured findings with stable `SEMVERCAGE_*` codes, severity, explanation, and remediation.
 - Dual ESM and CommonJS entry points with hand-authored strict TypeScript declarations.
-- Zero runtime dependencies and zero development dependencies.
+- Zero runtime dependencies. The only development dependency is the pinned fast-check property-testing library.
 
 ## Install
 
