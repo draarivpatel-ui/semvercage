@@ -1,0 +1,74 @@
+{
+  "name": "semvercage",
+  "version": "1.0.0",
+  "description": "Zero-dependency SemVer, dependency specifier, and package lockfile supply-chain security firewall",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/draarivpatel-ui/semvercage.git"
+  },
+  "homepage": "https://github.com/draarivpatel-ui/semvercage#readme",
+  "bugs": {
+    "url": "https://github.com/draarivpatel-ui/semvercage/issues"
+  },
+  "type": "module",
+  "main": "./dist/cjs/index.cjs",
+  "module": "./src/index.mjs",
+  "types": "./types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "import": "./src/index.mjs",
+      "require": "./dist/cjs/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "semvercage": "bin/semvercage.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "dist/cjs",
+    "types",
+    "examples",
+    "README.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build:cjs": "node scripts/build-cjs.mjs",
+    "check:cjs": "node scripts/build-cjs.mjs --check",
+    "check:types": "node scripts/check-types.mjs",
+    "smoke": "node scripts/cli-smoke.mjs",
+    "test": "node scripts/run-tests.mjs",
+    "check:pack": "node scripts/check-pack.mjs",
+    "prepack": "node scripts/build-cjs.mjs --check"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "security",
+    "semver",
+    "semantic-versioning",
+    "supply-chain-security",
+    "dependency-confusion",
+    "typosquatting",
+    "lockfile-security",
+    "package-lock",
+    "npm-security",
+    "redos",
+    "cwe-1333",
+    "integrity",
+    "firewall",
+    "zero-dependency",
+    "nodejs"
+  ],
+  "author": "draarivpatel-ui",
+  "license": "MIT",
+  "sideEffects": false,
+  "dependencies": {},
+  "devDependencies": {}
+}
