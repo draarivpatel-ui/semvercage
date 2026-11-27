@@ -114,6 +114,7 @@ const resolvedCases = [
   ['http URL', 'http://registry.npmjs.org/sample-package/-/sample-package-1.2.3.tgz', SEMVERCAGE_FINDING_CODES.LOCKFILE_NON_HTTPS_RESOLVED, 'critical'],
   ['git URL', 'git://registry.npmjs.org/sample-package.git', SEMVERCAGE_FINDING_CODES.LOCKFILE_NON_HTTPS_RESOLVED, 'critical'],
   ['credentials', 'https://user:pass@registry.npmjs.org/sample-package/-/sample-package-1.2.3.tgz', SEMVERCAGE_FINDING_CODES.LOCKFILE_CREDENTIALS_RESOLVED, 'critical'],
+  ['token only credentials', 'https://token@registry.npmjs.org/sample-package/-/sample-package-1.2.3.tgz', SEMVERCAGE_FINDING_CODES.LOCKFILE_CREDENTIALS_RESOLVED, 'critical'],
   ['ipv4 literal', 'https://127.0.0.1/sample-package/-/sample-package-1.2.3.tgz', SEMVERCAGE_FINDING_CODES.LOCKFILE_IP_LITERAL_RESOLVED, 'critical'],
   ['ipv6 literal', 'https://[2001:db8::1]/sample-package/-/sample-package-1.2.3.tgz', SEMVERCAGE_FINDING_CODES.LOCKFILE_IP_LITERAL_RESOLVED, 'critical'],
   ['untrusted host', 'https://evil.example.com/sample-package/-/sample-package-1.2.3.tgz', SEMVERCAGE_FINDING_CODES.LOCKFILE_UNTRUSTED_REGISTRY, 'high'],
@@ -180,7 +181,7 @@ for (const [entryVersion, urlVersion, shouldFlag] of [
   ['1.2.4', '1.2.3', true],
   ['2.0.0', '1.2.3', true],
   ['1.2.3', '1.2.3', false],
-  ['1.2.3+build', '1.2.3', false]
+  ['1.2.3+build', '1.2.3', true]
 ]) {
   test('tarball URL version consistency ' + entryVersion + ' versus ' + urlVersion, () => {
     const report = auditLockfile(mutateValid((lockfile) => {
@@ -248,7 +249,12 @@ test('multiple transitive install scripts produce duplicate risk finding', () =>
 });
 
 function addLegacy(lockfile, legacyEntry) {
-  lockfile.dependencies = { 'sample-package': legacyEntry };
+  lockfile.dependencies = {
+    'sample-package': {
+      resolved: 'https://registry.npmjs.org/sample-package/-/sample-package-1.2.3.tgz',
+      ...legacyEntry
+    }
+  };
 }
 test('matching legacy dependency snapshot produces no consistency finding', () => {
   const report = auditLockfile(mutateValid((lockfile) => {
@@ -397,4 +403,104 @@ test('shared noncyclic object references do not produce a cycle finding', () => 
   lockfile.extraB = shared;
   const report = auditLockfile(lockfile);
   assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.OBJECT_CYCLE), false);
+});
+
+test('lockfile accessor properties are not executed during audit', () => {
+  let invoked = 0;
+  const lockfile = validLock();
+  Object.defineProperty(lockfile.packages['node_modules/sample-package'], 'version', {
+    enumerable: true,
+    get() {
+      invoked += 1;
+      return '1.2.3';
+    }
+  });
+  const report = auditLockfile(lockfile);
+  assert.equal(invoked, 0);
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.OBJECT_ACCESSOR, 'high'), true);
+});
+test('inherited lockfile metadata does not satisfy validation', () => {
+  const lockfile = Object.create({ lockfileVersion: 3, packages: {} });
+  const report = auditLockfile(lockfile);
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.LOCKFILE_UNSUPPORTED_VERSION, 'critical'), true);
+});
+test('resolved tarball package substitution is flagged', () => {
+  const report = auditLockfile(mutateValid((lockfile) => {
+    lockfile.packages['node_modules/sample-package'].resolved = 'https://registry.npmjs.org/other-package/-/other-package-1.2.3.tgz';
+  }));
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.LOCKFILE_PACKAGE_NAME_MISMATCH, 'high'), true);
+});
+test('legacy resolved URL mismatch is flagged', () => {
+  const report = auditLockfile(mutateValid((lockfile) => {
+    lockfile.lockfileVersion = 2;
+    addLegacy(lockfile, {
+      version: '1.2.3',
+      resolved: 'https://evil.example.com/sample-package/-/sample-package-1.2.3.tgz',
+      integrity: SHA512
+    });
+  }));
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.LOCKFILE_UNTRUSTED_REGISTRY), true);
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.LOCKFILE_RESOLVED_MISMATCH, 'high'), true);
+});
+test('legacy missing integrity is inconsistent with packages snapshot', () => {
+  const report = auditLockfile(mutateValid((lockfile) => {
+    lockfile.lockfileVersion = 2;
+    lockfile.dependencies = {
+      'sample-package': {
+        version: '1.2.3',
+        resolved: 'https://registry.npmjs.org/sample-package/-/sample-package-1.2.3.tgz'
+      }
+    };
+  }));
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.LOCKFILE_MISSING_INTEGRITY, 'high'), true);
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.LOCKFILE_INTEGRITY_MISMATCH, 'high'), true);
+});
+test('packages-only install script flag does not create a false undeclared mismatch', () => {
+  const report = auditLockfile(mutateValid((lockfile) => {
+    lockfile.lockfileVersion = 2;
+    lockfile.packages['node_modules/sample-package'].hasInstallScript = true;
+    addLegacy(lockfile, { version: '1.2.3', integrity: SHA512 });
+  }));
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.LOCKFILE_INSTALL_SCRIPT, 'high'), true);
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.LOCKFILE_UNDECLARED_INSTALL_SCRIPT), false);
+});
+test('deep legacy dependency mismatch is audited within configured object bounds', () => {
+  const lockfile = validLock();
+  lockfile.lockfileVersion = 2;
+  const legacyRoot = {};
+  let cursor = legacyRoot;
+  let packagePath = '';
+  for (let depth = 0; depth < 15; depth += 1) {
+    const name = depth % 2 === 0 ? 'dep-a' : 'dep-b';
+    packagePath += (packagePath ? '/node_modules/' : 'node_modules/') + name;
+    const resolved = 'https://registry.npmjs.org/' + name + '/-/' + name + '-1.0.0.tgz';
+    const legacyEntry = { version: depth === 14 ? '1.0.1' : '1.0.0', resolved, integrity: SHA512 };
+    cursor[name] = legacyEntry;
+    lockfile.packages[packagePath] = { version: '1.0.0', resolved, integrity: SHA512 };
+    legacyEntry.dependencies = {};
+    cursor = legacyEntry.dependencies;
+  }
+  lockfile.dependencies = legacyRoot;
+  const report = auditLockfile(lockfile, { maxObjectDepth: 100 });
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.LOCKFILE_VERSION_MISMATCH, 'high'), true);
+});
+test('requireIntegrity false relaxes missing and weak integrity but not malformed integrity', () => {
+  const missing = mutateValid((lockfile) => {
+    delete lockfile.packages['node_modules/sample-package'].integrity;
+  });
+  const weak = mutateValid((lockfile) => {
+    lockfile.packages['node_modules/sample-package'].integrity = SHA1;
+  });
+  const malformed = mutateValid((lockfile) => {
+    lockfile.packages['node_modules/sample-package'].integrity = 'sha512-not-valid';
+  });
+  assert.equal(hasFinding(auditLockfile(missing, { requireIntegrity: false }), SEMVERCAGE_FINDING_CODES.LOCKFILE_MISSING_INTEGRITY), false);
+  assert.equal(hasFinding(auditLockfile(weak, { requireIntegrity: false }), SEMVERCAGE_FINDING_CODES.LOCKFILE_WEAK_INTEGRITY), false);
+  assert.equal(hasFinding(auditLockfile(malformed, { requireIntegrity: false }), SEMVERCAGE_FINDING_CODES.LOCKFILE_MALFORMED_INTEGRITY, 'high'), true);
+});
+test('requireHttps false relaxes only the scheme requirement', () => {
+  const report = auditLockfile(mutateValid((lockfile) => {
+    lockfile.packages['node_modules/sample-package'].resolved = 'http://registry.npmjs.org/sample-package/-/sample-package-1.2.3.tgz';
+  }), { requireHttps: false });
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.LOCKFILE_NON_HTTPS_RESOLVED), false);
 });

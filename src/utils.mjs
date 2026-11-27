@@ -106,7 +106,7 @@ export function hasCredentialAuthority(text) {
     if (authorityEnd === -1) authorityEnd = value.length;
     const authority = value.slice(authorityStart, authorityEnd);
     const at = authority.lastIndexOf('@');
-    if (at > 0 && authority.slice(0, at).includes(':')) return true;
+    if (at > 0) return true;
     cursor = Math.max(authorityEnd, authorityStart);
   }
   return false;

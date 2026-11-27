@@ -71,12 +71,12 @@ export function parsePartialVersion(input, options = {}) {
     });
   }
   const parts = input.split('.');
+  if (parts.length > 3) throw rangeError('partial version has too many numeric identifiers', { comparator: input });
   let concrete = parts.length;
   while (concrete > 0 && isWildcardPart(parts[concrete - 1])) concrete -= 1;
   if (concrete === 0) {
     return deepFreeze({ precision: 0, major: null, minor: null, patch: null, prerelease: Object.freeze([]), source: input });
   }
-  if (concrete > 3) throw rangeError('partial version has too many numeric identifiers', { comparator: input });
   for (let index = 0; index < concrete; index += 1) {
     if (isWildcardPart(parts[index])) throw rangeError('wildcard cannot precede a numeric identifier', { comparator: input });
     if (!validNumericPart(parts[index])) throw rangeError('partial version numeric identifier is invalid', { comparator: input });

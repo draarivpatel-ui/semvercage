@@ -21,6 +21,17 @@ function sanitize(text) {
   return output;
 }
 
+function sanitizeJsonValue(value) {
+  if (typeof value === 'string') return sanitize(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeJsonValue(item));
+  if (value && typeof value === 'object') {
+    const output = {};
+    for (const key of Object.keys(value)) output[sanitize(key)] = sanitizeJsonValue(value[key]);
+    return output;
+  }
+  return value;
+}
+
 function usage() {
   return [
     'semvercage ' + SEMVERCAGE_VERSION,
@@ -80,7 +91,7 @@ function policyOptions(flags) {
 }
 
 function printJson(value) {
-  process.stdout.write(JSON.stringify(value, null, 2) + '\n');
+  process.stdout.write(JSON.stringify(sanitizeJsonValue(value), null, 2) + '\n');
 }
 
 function printReport(report, json) {

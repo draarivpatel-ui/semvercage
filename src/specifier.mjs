@@ -385,6 +385,15 @@ export function collectSpecifierFindings(packageName, specifier, path, dependenc
     return findings;
   }
 
+  if (specifier.includes('+')) {
+    findings.push(makeFinding(
+      SEMVERCAGE_FINDING_CODES.SPEC_BUILD_METADATA,
+      'high',
+      'dependency specifier contains build metadata that semver range matching ignores during artifact selection',
+      'pin the canonical registry version without build metadata and verify the artifact through lockfile integrity',
+      context
+    ));
+  }
   for (const union of range.unions) {
     const risk = unionRisk(union);
     if (risk.any) {

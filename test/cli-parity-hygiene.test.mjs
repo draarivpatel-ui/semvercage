@@ -109,6 +109,12 @@ test('CLI error output strips hostile control characters', () => {
   assert.equal(result.status, 2);
   assert.equal(result.stderr.includes(String.fromCharCode(27)), false);
 });
+test('CLI JSON output strips hostile bidirectional characters', () => {
+  const result = runCli(['audit-spec', 'pack\u202eage', '1.0.0', '--json']);
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout.includes('\u202e'), false);
+  assert.equal(JSON.parse(result.stdout).ok, false);
+});
 
 test('CLI audit-manifest reads package.json', () => {
   const dir = scratchDir();

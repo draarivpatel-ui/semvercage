@@ -25,7 +25,7 @@ In scope:
 - parser denial of service or complexity bypasses
 - incorrect SemVer precedence or range matching with security impact
 - missed detection for documented dependency specifier attacks
-- prototype pollution key handling
+- prototype pollution keys, inherited properties, accessor execution, and cyclic object handling
 - lockfile integrity, registry, install script, or version mismatch bypasses
 - CLI output injection or uncaught hostile-input failures
 

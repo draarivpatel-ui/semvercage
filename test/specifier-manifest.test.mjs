@@ -30,7 +30,6 @@ const safeSpecifiers = [
   '0.2.3',
   '^0.2.3',
   '~0.2.3',
-  '1.2.3+build.1',
   '1.2.3 || 1.2.4',
   '2.x',
   '>=0.1.0 <0.2.0'
@@ -65,6 +64,12 @@ for (const [specifier, code, severity] of wildcardAndBroadCases) {
     assert.equal(report.ok, false);
   });
 }
+
+test('dependency specifier build metadata is flagged as substitution risk', () => {
+  const report = auditSpecifier('simplepackage', '1.2.3+build.1');
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.SPEC_BUILD_METADATA, 'high'), true);
+  assert.equal(report.ok, false);
+});
 
 const prereleaseSpecifiers = [
   '1.0.0-alpha',
@@ -153,6 +158,8 @@ const credentialSpecifiers = [
   'http://user:pass@example.com/package.tgz',
   'git+https://user:pass@example.com/org/repo.git',
   'git+ssh://user:pass@example.com/org/repo.git',
+  'https://token@example.com/package.tgz',
+  'git+https://token@example.com/org/repo.git',
   'npm:evil@https://user:pass@example.com/package.tgz',
   'https://user:pass@example.com/a.tgz https://user:pass@example.org/b.tgz'
 ];
@@ -376,6 +383,52 @@ test('manifest JSON input is accepted', () => {
 test('invalid manifest JSON throws a structured error', () => {
   assert.throws(() => auditPackageJson('{'), (error) => error.code === SEMVERCAGE_ERROR_CODES.INVALID_MANIFEST);
 });
+test('manifest accessor properties are not executed during audit', () => {
+  let invoked = 0;
+  const manifest = { name: 'clean-service' };
+  Object.defineProperty(manifest, 'dependencies', {
+    enumerable: true,
+    get() {
+      invoked += 1;
+      return { simplepackage: '*' };
+    }
+  });
+  const report = auditPackageJson(manifest);
+  assert.equal(invoked, 0);
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.OBJECT_ACCESSOR, 'high'), true);
+  assert.equal(report.dependencyCount, 0);
+});
+test('manifest nonenumerable accessor properties are detected without execution', () => {
+  let invoked = 0;
+  const manifest = { name: 'clean-service' };
+  Object.defineProperty(manifest, 'dependencies', {
+    enumerable: false,
+    get() {
+      invoked += 1;
+      return { simplepackage: '*' };
+    }
+  });
+  const report = auditPackageJson(manifest);
+  assert.equal(invoked, 0);
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.OBJECT_ACCESSOR, 'high'), true);
+});
+test('inherited manifest dependencies are not audited as own data', () => {
+  const manifest = Object.create({ dependencies: { simplepackage: '*' } });
+  manifest.name = 'clean-service';
+  const report = auditPackageJson(manifest);
+  assert.equal(report.dependencyCount, 0);
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.SPEC_UNPINNED_WILDCARD), false);
+});
+test('arrays containing distinct objects are not false positive cycles', () => {
+  const report = auditPackageJson({ name: 'clean-service', funding: [{ type: 'a' }, { type: 'b' }] });
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.OBJECT_CYCLE), false);
+});
+test('sparse bundled dependency arrays preserve their length through sanitization', () => {
+  const bundled = new Array(3);
+  const report = auditPackageJson({ name: 'clean-service', bundledDependencies: bundled });
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.MANIFEST_BUNDLED_DEPENDENCIES), true);
+});
+
 test('manifest report is frozen', () => {
   const report = auditPackageJson({ name: 'clean-service', dependencies: { simplepackage: '*' } });
   assert.equal(Object.isFrozen(report), true);

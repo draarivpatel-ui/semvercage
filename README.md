@@ -12,10 +12,10 @@ The library is designed for security automation, CI gates, package manager wrapp
 - Range support for exact versions, caret, tilde, comparison operators, hyphen ranges, X ranges, and union expressions.
 - Comparator, union, input length, object depth, and object breadth limits.
 - Prerelease isolation that does not match a prerelease across a different major, minor, patch tuple unless explicitly requested.
-- Detection for mutable tags, wildcard specifiers, unbounded lower-only ranges, prerelease drift, git and hosting shorthand specifiers, remote tarballs, local path specifiers, workspace protocol misuse, npm alias indirection, and credential-bearing URLs.
+- Detection for mutable tags, wildcard specifiers, unbounded lower-only ranges, prerelease drift, build metadata substitution risk, git and hosting shorthand specifiers, remote tarballs, local path specifiers, workspace protocol misuse, npm alias indirection, and credential-bearing URLs.
 - Dependency confusion and typosquatting signals for private-looking unscoped names, invalid names, non ASCII names, case confusion, and suspicious separator patterns.
-- Manifest auditing for dependency fields, overrides, resolutions, install lifecycle hooks, bundled dependencies, and prototype pollution keys.
-- Lockfile auditing for missing or weak integrity, malformed SRI, non HTTPS resolution, unexpected registries, IP literals, credentials, tarball version mismatch, dependency snapshot mismatch, transitive install scripts, and prototype pollution keys.
+- Manifest auditing for dependency fields, overrides, resolutions, install lifecycle hooks, bundled dependencies, prototype pollution keys, cyclic input, deep or broad object graphs, and accessor properties that cannot be audited without executing code.
+- Lockfile auditing for missing or weak integrity, malformed SRI, non HTTPS resolution, unexpected registries, IP literals, credentials, exact tarball package and version mismatch, legacy dependency snapshot mismatch, transitive install scripts, and prototype pollution keys.
 - Upgrade auditing for downgrades, unexpected major jumps, stable to prerelease transitions, prerelease channel movement, and build-metadata-only substitution.
 - Structured findings with stable `SEMVERCAGE_*` codes, severity, explanation, and remediation.
 - Dual ESM and CommonJS entry points with hand-authored strict TypeScript declarations.
@@ -169,6 +169,8 @@ Three presets are provided:
 - `strict`: fails on low severity and above, tight parser and object bounds, no unexpected major jump by default.
 - `balanced`: fails on medium severity and above, one major jump by default.
 - `ci`: fails on high severity and above, suitable for a CI gate that still blocks critical supply-chain behavior.
+
+`requireIntegrity` controls whether missing or weak integrity is policy blocking, while malformed integrity always remains blocking. `requireHttps` controls whether non HTTPS resolved URLs are policy blocking; credentials, IP literals, and untrusted registries remain findings either way.
 
 Policies can be customized:
 

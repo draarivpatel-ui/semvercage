@@ -1,5 +1,5 @@
 import { DEPENDENCY_FIELDS, LIFECYCLE_SCRIPTS, OVERRIDE_FIELDS, SEMVERCAGE_ERROR_CODES, SEMVERCAGE_FINDING_CODES } from './constants.mjs';
-import { parseJsonObjectInput, scanObjectTree } from './guards.mjs';
+import { parseJsonObjectInput, sanitizeObjectTree } from './guards.mjs';
 import { resolvePolicy } from './policy.mjs';
 import { collectPackageNameFindings, collectSpecifierFindings } from './specifier.mjs';
 import { buildReport, makeFinding } from './utils.mjs';
@@ -114,9 +114,9 @@ function auditBundledDependencies(manifest, findings) {
 
 export function auditPackageJson(input, options = {}) {
   const policy = resolvePolicy(options);
-  const manifest = parseJsonObjectInput(input, SEMVERCAGE_ERROR_CODES.INVALID_MANIFEST, 'package.json', policy);
+  const inputObject = parseJsonObjectInput(input, SEMVERCAGE_ERROR_CODES.INVALID_MANIFEST, 'package.json', policy);
   const findings = [];
-  scanObjectTree(manifest, policy, findings, '$');
+  const manifest = sanitizeObjectTree(inputObject, policy, findings, '$');
   if (typeof manifest.name === 'string') {
     findings.push(...collectPackageNameFindings(manifest.name, 'name', policy));
   }

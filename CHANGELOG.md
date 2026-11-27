@@ -16,3 +16,5 @@ Initial release.
 - Dual ESM and CommonJS package entry points.
 - Strict hand-authored TypeScript declarations.
 - Command line interface with JSON output and clean exit codes.
+- Hardened object graph sanitization for inherited properties, accessors, arrays, cycles, depth, and breadth.
+- Hardened credential URL, build metadata, wildcard arity, tarball consistency, and package-lock legacy representation auditing.

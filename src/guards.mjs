@@ -20,8 +20,25 @@ export function parseJsonObjectInput(input, errorCode, label, policy) {
   return value;
 }
 
-export function scanObjectTree(root, policy, findings, rootPath = '$') {
-  const stack = [{ value: root, path: rootPath, depth: 0, ancestors: [] }];
+function objectContainer(value) {
+  if (!Array.isArray(value)) return Object.create(null);
+  const output = [];
+  output.length = value.length;
+  return output;
+}
+
+function defineDataProperty(target, key, value) {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true
+  });
+}
+
+export function sanitizeObjectTree(root, policy, findings, rootPath = '$') {
+  const rootClone = objectContainer(root);
+  const stack = [{ value: root, clone: rootClone, path: rootPath, depth: 0, ancestors: [] }];
   let totalKeys = 0;
   let depthReported = false;
   let breadthReported = false;
@@ -39,7 +56,7 @@ export function scanObjectTree(root, policy, findings, rootPath = '$') {
       ));
       continue;
     }
-    const childAncestors = item.ancestors.concat(value);
+    const childAncestors = item.ancestors.concat([value]);
     if (item.depth > policy.maxObjectDepth) {
       if (!depthReported) {
         depthReported = true;
@@ -53,7 +70,7 @@ export function scanObjectTree(root, policy, findings, rootPath = '$') {
       }
       continue;
     }
-    const keys = Object.keys(value);
+    const keys = Object.getOwnPropertyNames(value).filter((key) => !(Array.isArray(value) && key === 'length'));
     totalKeys += keys.length;
     if (totalKeys > policy.maxObjectKeys) {
       if (!breadthReported) {
@@ -69,19 +86,48 @@ export function scanObjectTree(root, policy, findings, rootPath = '$') {
       break;
     }
     for (const key of keys) {
+      const childPath = item.path + '.' + key;
       if (POLLUTION_KEYS.includes(key)) {
         findings.push(makeFinding(
           SEMVERCAGE_FINDING_CODES.PROTOTYPE_POLLUTION_KEY,
           'critical',
           'input contains a prototype pollution key',
           'remove the pollution key and regenerate the manifest or lockfile',
-          { path: item.path + '.' + key, key }
+          { path: childPath, key }
         ));
       }
-      const child = value[key];
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor) continue;
+      if (Object.prototype.hasOwnProperty.call(descriptor, 'get') || Object.prototype.hasOwnProperty.call(descriptor, 'set')) {
+        findings.push(makeFinding(
+          SEMVERCAGE_FINDING_CODES.OBJECT_ACCESSOR,
+          'high',
+          'input object contains an accessor property that cannot be audited without executing code',
+          'parse input from JSON or replace accessor properties with plain data values',
+          { path: childPath, key }
+        ));
+        continue;
+      }
+      if (!Object.prototype.hasOwnProperty.call(descriptor, 'value')) continue;
+      const child = descriptor.value;
       if (child && typeof child === 'object') {
-        stack.push({ value: child, path: item.path + '.' + key, depth: item.depth + 1, ancestors: childAncestors });
+        if (childAncestors.includes(child)) {
+          findings.push(makeFinding(
+            SEMVERCAGE_FINDING_CODES.OBJECT_CYCLE,
+            'high',
+            'input object contains a cyclic reference',
+            'parse input from JSON or remove cyclic references before auditing',
+            { path: childPath }
+          ));
+          continue;
+        }
+        const childClone = objectContainer(child);
+        defineDataProperty(item.clone, key, childClone);
+        stack.push({ value: child, clone: childClone, path: childPath, depth: item.depth + 1, ancestors: childAncestors });
+      } else {
+        defineDataProperty(item.clone, key, child);
       }
     }
   }
+  return rootClone;
 }

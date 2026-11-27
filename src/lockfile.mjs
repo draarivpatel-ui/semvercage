@@ -1,7 +1,7 @@
 import { SEMVERCAGE_ERROR_CODES, SEMVERCAGE_FINDING_CODES } from './constants.mjs';
-import { parseJsonObjectInput, scanObjectTree } from './guards.mjs';
+import { parseJsonObjectInput, sanitizeObjectTree } from './guards.mjs';
 import { resolvePolicy } from './policy.mjs';
-import { compareSemver, tryParseSemver } from './semver.mjs';
+import { tryParseSemver } from './semver.mjs';
 import { collectPackageNameFindings } from './specifier.mjs';
 import { buildReport, hasControlOrNonAscii, hasCredentialAuthority, makeFinding, redactCredentialAuthority } from './utils.mjs';
 
@@ -80,8 +80,8 @@ function isIpLiteral(host) {
   return isIpv4Literal(host) || host.includes(':');
 }
 
-function auditResolvedUrl(resolved, packagePath, policy, findings) {
-  const context = { path: 'packages.' + packagePath + '.resolved', packagePath, resolved: redactCredentialAuthority(resolved) };
+function auditResolvedUrl(resolved, packagePath, policy, findings, propertyPath = 'packages.' + packagePath + '.resolved') {
+  const context = { path: propertyPath, packagePath, resolved: redactCredentialAuthority(resolved) };
   if (hasControlOrNonAscii(resolved)) {
     findings.push(makeFinding(
       SEMVERCAGE_FINDING_CODES.LOCKFILE_UNTRUSTED_REGISTRY,
@@ -90,7 +90,7 @@ function auditResolvedUrl(resolved, packagePath, policy, findings) {
       'regenerate the lockfile with a plain ASCII trusted registry URL',
       context
     ));
-    return;
+    return null;
   }
   if (hasCredentialAuthority(resolved)) {
     findings.push(makeFinding(
@@ -101,7 +101,7 @@ function auditResolvedUrl(resolved, packagePath, policy, findings) {
       context
     ));
   }
-  if (!resolved.toLowerCase().startsWith('https://')) {
+  if (!resolved.toLowerCase().startsWith('https://') && policy.requireHttps) {
     findings.push(makeFinding(
       SEMVERCAGE_FINDING_CODES.LOCKFILE_NON_HTTPS_RESOLVED,
       'critical',
@@ -109,7 +109,7 @@ function auditResolvedUrl(resolved, packagePath, policy, findings) {
       'regenerate the lockfile against an HTTPS registry endpoint',
       context
     ));
-    return;
+    return null;
   }
   let url;
   try {
@@ -122,7 +122,7 @@ function auditResolvedUrl(resolved, packagePath, policy, findings) {
       'regenerate the lockfile with a valid trusted registry URL',
       context
     ));
-    return;
+    return null;
   }
   const host = url.hostname.toLowerCase();
   if (isIpLiteral(host)) {
@@ -146,77 +146,54 @@ function auditResolvedUrl(resolved, packagePath, policy, findings) {
   return url;
 }
 
-function tarballVersion(url, packageName) {
-  if (!url) return null;
+function inspectTarballUrl(url, packageName) {
+  if (!url || !packageName) return { recognized: false };
   const baseName = packageName.includes('/') ? packageName.slice(packageName.indexOf('/') + 1) : packageName;
   const marker = '/-/';
   const markerIndex = url.pathname.lastIndexOf(marker);
-  if (markerIndex === -1) return null;
+  if (markerIndex === -1) return { recognized: false };
   const fileName = url.pathname.slice(markerIndex + marker.length);
   const prefix = baseName + '-';
-  if (!fileName.startsWith(prefix) || !fileName.endsWith('.tgz')) return null;
-  const version = fileName.slice(prefix.length, fileName.length - 4);
-  return tryParseSemver(version);
-}
-
-function collectLegacyDependencies(dependencies, output, basePath = '', depth = 0) {
-  if (!dependencies || typeof dependencies !== 'object' || Array.isArray(dependencies) || depth > 12) return;
-  for (const name of Object.keys(dependencies)) {
-    const entry = dependencies[name];
-    if (!entry || typeof entry !== 'object') continue;
-    const packagePath = basePath + (basePath ? '/node_modules/' : 'node_modules/') + name;
-    output.set(packagePath, { name, entry, packagePath });
-    collectLegacyDependencies(entry.dependencies, output, packagePath, depth + 1);
+  if (!fileName.startsWith(prefix) || !fileName.endsWith('.tgz')) {
+    return { recognized: true, packageMismatch: true, fileName, expectedPrefix: prefix };
   }
+  const versionText = fileName.slice(prefix.length, fileName.length - 4);
+  return { recognized: true, packageMismatch: false, versionText, version: tryParseSemver(versionText) };
 }
 
-function auditLegacyConsistency(lockfile, packages, findings) {
-  if (!lockfile.dependencies || typeof lockfile.dependencies !== 'object' || Array.isArray(lockfile.dependencies)) return;
-  const legacy = new Map();
-  collectLegacyDependencies(lockfile.dependencies, legacy);
-  for (const item of legacy.values()) {
-    const current = packages[item.packagePath];
-    if (!current || typeof current !== 'object') continue;
-    if (typeof item.entry.version === 'string' && typeof current.version === 'string' && item.entry.version !== current.version) {
-      findings.push(makeFinding(
-        SEMVERCAGE_FINDING_CODES.LOCKFILE_VERSION_MISMATCH,
-        'high',
-        'lockfile dependency summary version differs from the packages snapshot',
-        'regenerate the lockfile with one package manager version',
-        { path: 'dependencies.' + item.name + '.version', packagePath: item.packagePath, summaryVersion: item.entry.version, packagesVersion: current.version }
-      ));
-    }
-    if (typeof item.entry.integrity === 'string' && typeof current.integrity === 'string' && item.entry.integrity !== current.integrity) {
-      findings.push(makeFinding(
-        SEMVERCAGE_FINDING_CODES.LOCKFILE_INTEGRITY_MISMATCH,
-        'high',
-        'lockfile dependency summary integrity differs from the packages snapshot',
-        'regenerate the lockfile and investigate tampering before installing',
-        { path: 'dependencies.' + item.name + '.integrity', packagePath: item.packagePath }
-      ));
-    }
-    if (item.entry.hasInstallScript === true && current.hasInstallScript !== true) {
-      findings.push(makeFinding(
-        SEMVERCAGE_FINDING_CODES.LOCKFILE_UNDECLARED_INSTALL_SCRIPT,
-        'critical',
-        'legacy lockfile dependency declares an install script missing from the packages snapshot',
-        'regenerate the lockfile and inspect the dependency lifecycle script before installing',
-        { path: 'dependencies.' + item.name + '.hasInstallScript', packagePath: item.packagePath }
-      ));
+function isLocalEntry(entry) {
+  return entry.link === true || (typeof entry.resolved === 'string' && entry.resolved.startsWith('file:'));
+}
+
+function collectLegacyDependencies(dependencies, output, policy) {
+  if (!dependencies || typeof dependencies !== 'object' || Array.isArray(dependencies)) return;
+  const stack = [{ dependencies, basePath: '', depth: 0 }];
+  while (stack.length > 0) {
+    const item = stack.pop();
+    if (item.depth > policy.maxObjectDepth) continue;
+    for (const name of Object.keys(item.dependencies)) {
+      const entry = item.dependencies[name];
+      const packagePath = item.basePath + (item.basePath ? '/node_modules/' : 'node_modules/') + name;
+      output.set(packagePath, { name, entry, packagePath });
+      if (entry && typeof entry === 'object' && !Array.isArray(entry) && entry.dependencies && typeof entry.dependencies === 'object' && !Array.isArray(entry.dependencies)) {
+        stack.push({ dependencies: entry.dependencies, basePath: packagePath, depth: item.depth + 1 });
+      }
     }
   }
 }
 
-function auditIntegrity(entry, packagePath, findings) {
-  const context = { path: 'packages.' + packagePath + '.integrity', packagePath };
+function auditIntegrity(entry, packagePath, findings, policy, propertyPath = 'packages.' + packagePath + '.integrity') {
+  const context = { path: propertyPath, packagePath };
   if (entry.integrity === undefined) {
-    findings.push(makeFinding(
-      SEMVERCAGE_FINDING_CODES.LOCKFILE_MISSING_INTEGRITY,
-      'high',
-      'lockfile package entry is missing an integrity hash',
-      'regenerate the lockfile with registry integrity metadata',
-      context
-    ));
+    if (policy.requireIntegrity) {
+      findings.push(makeFinding(
+        SEMVERCAGE_FINDING_CODES.LOCKFILE_MISSING_INTEGRITY,
+        'high',
+        'lockfile package entry is missing an integrity hash',
+        'regenerate the lockfile with registry integrity metadata',
+        context
+      ));
+    }
     return;
   }
   const integrity = classifyIntegrity(entry.integrity);
@@ -228,7 +205,7 @@ function auditIntegrity(entry, packagePath, findings) {
       'regenerate the lockfile and verify the package metadata was not tampered with',
       context
     ));
-  } else if (integrity.state === 'weak') {
+  } else if (integrity.state === 'weak' && policy.requireIntegrity) {
     findings.push(makeFinding(
       SEMVERCAGE_FINDING_CODES.LOCKFILE_WEAK_INTEGRITY,
       integrity.severity,
@@ -239,11 +216,118 @@ function auditIntegrity(entry, packagePath, findings) {
   }
 }
 
+function compareLegacyConsistency(item, entry, current, findings) {
+  const context = { path: 'dependencies.' + item.name, packagePath: item.packagePath };
+  if (typeof entry.version === 'string' || typeof current.version === 'string') {
+    if (entry.version !== current.version) {
+      findings.push(makeFinding(
+        SEMVERCAGE_FINDING_CODES.LOCKFILE_VERSION_MISMATCH,
+        'high',
+        'lockfile dependency summary version differs from the packages snapshot',
+        'regenerate the lockfile with one package manager version',
+        { ...context, summaryVersion: entry.version, packagesVersion: current.version }
+      ));
+    }
+  }
+  if (!isLocalEntry(entry) && !isLocalEntry(current) && (entry.integrity !== undefined || current.integrity !== undefined) && entry.integrity !== current.integrity) {
+    findings.push(makeFinding(
+      SEMVERCAGE_FINDING_CODES.LOCKFILE_INTEGRITY_MISMATCH,
+      'high',
+      'lockfile dependency summary integrity differs from the packages snapshot',
+      'regenerate the lockfile and investigate tampering before installing',
+      context
+    ));
+  }
+  if (!isLocalEntry(entry) && !isLocalEntry(current) && (entry.resolved !== undefined || current.resolved !== undefined) && entry.resolved !== current.resolved) {
+    findings.push(makeFinding(
+      SEMVERCAGE_FINDING_CODES.LOCKFILE_RESOLVED_MISMATCH,
+      'high',
+      'lockfile dependency summary resolved URL differs from the packages snapshot',
+      'regenerate the lockfile and investigate registry response substitution before installing',
+      context
+    ));
+  }
+  if (entry.hasInstallScript === true && current.hasInstallScript !== true) {
+    findings.push(makeFinding(
+      SEMVERCAGE_FINDING_CODES.LOCKFILE_UNDECLARED_INSTALL_SCRIPT,
+      'critical',
+      'legacy lockfile dependency declares an install script missing from the packages snapshot',
+      'regenerate the lockfile and inspect the dependency lifecycle script before installing',
+      context
+    ));
+  }
+}
+
+function auditLegacyEntries(lockfile, packages, policy, findings, installScriptPaths) {
+  if (lockfile.dependencies === undefined) return;
+  if (!lockfile.dependencies || typeof lockfile.dependencies !== 'object' || Array.isArray(lockfile.dependencies)) {
+    findings.push(makeFinding(
+      SEMVERCAGE_FINDING_CODES.LOCKFILE_INVALID_PACKAGE_ENTRY,
+      'high',
+      'legacy lockfile dependencies field is not an object',
+      'regenerate the lockfile with a valid dependency summary object',
+      { path: 'dependencies' }
+    ));
+    return;
+  }
+  const legacy = new Map();
+  collectLegacyDependencies(lockfile.dependencies, legacy, policy);
+  for (const item of legacy.values()) {
+    const entry = item.entry;
+    const legacyPath = 'dependencies.' + item.packagePath;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      findings.push(makeFinding(
+        SEMVERCAGE_FINDING_CODES.LOCKFILE_INVALID_PACKAGE_ENTRY,
+        'high',
+        'legacy lockfile dependency entry is not an object',
+        'regenerate the lockfile with valid dependency entries',
+        { path: legacyPath, packagePath: item.packagePath }
+      ));
+      continue;
+    }
+    findings.push(...collectPackageNameFindings(item.name, legacyPath + '.packageName', policy));
+    if (typeof entry.version !== 'string' || !tryParseSemver(entry.version)) {
+      findings.push(makeFinding(
+        SEMVERCAGE_FINDING_CODES.LOCKFILE_INVALID_VERSION,
+        'high',
+        'legacy lockfile dependency version is missing or is not strict semver',
+        'regenerate the lockfile with strict semver package versions',
+        { path: legacyPath + '.version', packagePath: item.packagePath, value: entry.version }
+      ));
+    }
+    if (entry.hasInstallScript === true) {
+      installScriptPaths.add(item.packagePath);
+      findings.push(makeFinding(
+        SEMVERCAGE_FINDING_CODES.LOCKFILE_INSTALL_SCRIPT,
+        'high',
+        'legacy dependency summary is flagged as running an install lifecycle script',
+        'inspect the package lifecycle script and replace the dependency when execution is not necessary',
+        { path: legacyPath + '.hasInstallScript', packagePath: item.packagePath }
+      ));
+    }
+    const localEntry = isLocalEntry(entry);
+    if (typeof entry.resolved === 'string' && entry.resolved.length > 0) {
+      if (!entry.resolved.startsWith('file:')) auditResolvedUrl(entry.resolved, item.packagePath, policy, findings, legacyPath + '.resolved');
+    } else if (!localEntry) {
+      findings.push(makeFinding(
+        SEMVERCAGE_FINDING_CODES.LOCKFILE_MISSING_RESOLVED,
+        'medium',
+        'legacy dependency summary is missing a resolved URL',
+        'regenerate the lockfile so every registry package has an auditable resolved URL',
+        { path: legacyPath + '.resolved', packagePath: item.packagePath }
+      ));
+    }
+    if (!localEntry) auditIntegrity(entry, item.packagePath, findings, policy, legacyPath + '.integrity');
+    const current = packages[item.packagePath];
+    if (current && typeof current === 'object' && !Array.isArray(current)) compareLegacyConsistency(item, entry, current, findings);
+  }
+}
+
 export function auditLockfile(input, options = {}) {
   const policy = resolvePolicy(options);
-  const lockfile = parseJsonObjectInput(input, SEMVERCAGE_ERROR_CODES.INVALID_LOCKFILE, 'package-lock.json', policy);
+  const inputObject = parseJsonObjectInput(input, SEMVERCAGE_ERROR_CODES.INVALID_LOCKFILE, 'package-lock.json', policy);
   const findings = [];
-  scanObjectTree(lockfile, policy, findings, '$');
+  const lockfile = sanitizeObjectTree(inputObject, policy, findings, '$');
   if (lockfile.lockfileVersion !== 2 && lockfile.lockfileVersion !== 3) {
     findings.push(makeFinding(
       SEMVERCAGE_FINDING_CODES.LOCKFILE_UNSUPPORTED_VERSION,
@@ -266,7 +350,7 @@ export function auditLockfile(input, options = {}) {
 
   const packages = lockfile.packages;
   let packageCount = 0;
-  const installScriptPaths = [];
+  const installScriptPaths = new Set();
   for (const packagePath of Object.keys(packages)) {
     const entry = packages[packagePath];
     if (packagePath === '') continue;
@@ -294,7 +378,8 @@ export function auditLockfile(input, options = {}) {
         { path: 'packages.' + packagePath + '.name', packagePath, entryName: entry.name, inferredName: packageName }
       ));
     }
-    if (typeof entry.version !== 'string' || !tryParseSemver(entry.version)) {
+    const parsedEntryVersion = typeof entry.version === 'string' ? tryParseSemver(entry.version) : null;
+    if (!parsedEntryVersion) {
       findings.push(makeFinding(
         SEMVERCAGE_FINDING_CODES.LOCKFILE_INVALID_VERSION,
         'high',
@@ -304,7 +389,7 @@ export function auditLockfile(input, options = {}) {
       ));
     }
     if (entry.hasInstallScript === true) {
-      installScriptPaths.push(packagePath);
+      installScriptPaths.add(packagePath);
       findings.push(makeFinding(
         SEMVERCAGE_FINDING_CODES.LOCKFILE_INSTALL_SCRIPT,
         'high',
@@ -313,7 +398,7 @@ export function auditLockfile(input, options = {}) {
         { path: 'packages.' + packagePath + '.hasInstallScript', packagePath }
       ));
     }
-    const localEntry = entry.link === true || (typeof entry.resolved === 'string' && entry.resolved.startsWith('file:'));
+    const localEntry = isLocalEntry(entry);
     let parsedUrl = null;
     if (typeof entry.resolved === 'string' && entry.resolved.length > 0) {
       if (!entry.resolved.startsWith('file:')) parsedUrl = auditResolvedUrl(entry.resolved, packagePath, policy, findings);
@@ -326,30 +411,41 @@ export function auditLockfile(input, options = {}) {
         { path: 'packages.' + packagePath + '.resolved', packagePath }
       ));
     }
-    if (!localEntry) auditIntegrity(entry, packagePath, findings);
-    const archiveVersion = tarballVersion(parsedUrl, packageName);
-    if (archiveVersion && typeof entry.version === 'string' && tryParseSemver(entry.version) && compareSemver(archiveVersion, entry.version) !== 0) {
+    if (!localEntry) auditIntegrity(entry, packagePath, findings, policy);
+    const archive = inspectTarballUrl(parsedUrl, packageName);
+    if (archive.recognized && archive.packageMismatch) {
       findings.push(makeFinding(
-        SEMVERCAGE_FINDING_CODES.LOCKFILE_VERSION_MISMATCH,
+        SEMVERCAGE_FINDING_CODES.LOCKFILE_PACKAGE_NAME_MISMATCH,
         'high',
-        'lockfile package version does not match the version encoded in its resolved tarball URL',
-        'regenerate the lockfile and investigate registry response substitution',
-        { path: 'packages.' + packagePath + '.resolved', packagePath, entryVersion: entry.version, tarballVersion: archiveVersion.version }
+        'lockfile resolved tarball filename belongs to a different package than the node_modules path',
+        'regenerate the lockfile and investigate package substitution before installing',
+        { path: 'packages.' + packagePath + '.resolved', packagePath, inferredName: packageName, tarballFile: archive.fileName }
       ));
+    } else if (archive.recognized && parsedEntryVersion) {
+      if (!archive.version || archive.version.version !== parsedEntryVersion.version) {
+        findings.push(makeFinding(
+          SEMVERCAGE_FINDING_CODES.LOCKFILE_VERSION_MISMATCH,
+          'high',
+          'lockfile package version does not exactly match the version encoded in its resolved tarball URL',
+          'regenerate the lockfile and investigate registry response substitution',
+          { path: 'packages.' + packagePath + '.resolved', packagePath, entryVersion: entry.version, tarballVersion: archive.version ? archive.version.version : archive.versionText }
+        ));
+      }
     }
   }
-  if (installScriptPaths.length > 1) {
+  auditLegacyEntries(lockfile, packages, policy, findings, installScriptPaths);
+  const installScripts = Array.from(installScriptPaths);
+  if (installScripts.length > 1) {
     findings.push(makeFinding(
       SEMVERCAGE_FINDING_CODES.LOCKFILE_DUPLICATE_INSTALL_SCRIPT,
       'high',
       'multiple transitive dependencies request install lifecycle execution',
       'review every lifecycle script together and remove unnecessary install hooks',
-      { path: 'packages', count: installScriptPaths.length, packagePaths: installScriptPaths.slice(0, 16) }
+      { path: 'packages', count: installScripts.length, packagePaths: installScripts.slice(0, 16) }
     ));
   }
-  auditLegacyConsistency(lockfile, packages, findings);
   return buildReport('lockfile', policy, findings, {
     packageCount,
-    installScriptCount: installScriptPaths.length
+    installScriptCount: installScripts.length
   });
 }
