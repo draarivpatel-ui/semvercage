@@ -41,6 +41,11 @@ export interface SemverCageFinding {
   readonly packageName?: string;
   readonly specifier?: string;
   readonly dependencyType?: string;
+  readonly key?: string;
+  readonly packagePath?: string;
+  readonly depth?: number;
+  readonly count?: number;
+  readonly bound?: number;
   readonly [key: string]: unknown;
 }
 
@@ -58,6 +63,16 @@ export interface SemverCageReport {
   readonly policy: string;
   readonly findings: readonly SemverCageFinding[];
   readonly counts: SemverCageSeverityCounts;
+  readonly packageName?: string;
+  readonly specifier?: string;
+  readonly dependencyType?: string;
+  readonly dependencyCount?: number;
+  readonly lifecycleScriptCount?: number;
+  readonly packageCount?: number;
+  readonly installScriptCount?: number;
+  readonly fromVersion?: string;
+  readonly toVersion?: string;
+  readonly comparison?: SemverCageComparison;
   readonly [key: string]: unknown;
 }
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- TypeScript declarations now type report metadata (`dependencyCount`, `lifecycleScriptCount`, `packageCount`, `installScriptCount`, `packageName`, `specifier`, `dependencyType`, `fromVersion`, `toVersion`, `comparison`) and common finding context fields (`key`, `packagePath`, `depth`, `count`, `bound`).
+- `scripts/check-types.mjs` verifies that every runtime policy field and report metadata field is declared, and adds positive and negative compile-time cases for policy overrides, report metadata, and finding fields.
+
 ## 1.0.0
 
 Initial release.
