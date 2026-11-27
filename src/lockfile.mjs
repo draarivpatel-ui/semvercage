@@ -24,6 +24,40 @@ function packageNameFromPath(packagePath) {
   return first;
 }
 
+function npmAliasTarget(specifier) {
+  if (typeof specifier !== 'string' || !specifier.startsWith('npm:')) return null;
+  const body = specifier.slice(4);
+  if (!body) return null;
+  if (body.startsWith('@')) {
+    const slash = body.indexOf('/');
+    if (slash <= 1) return null;
+    const remainder = body.slice(slash + 1);
+    const at = remainder.indexOf('@');
+    if (at <= 0) return null;
+    return body.slice(0, slash + 1 + at);
+  }
+  const at = body.indexOf('@');
+  if (at <= 0) return null;
+  return body.slice(0, at);
+}
+
+function collectNpmAliasTargets(lockfile) {
+  const aliases = Object.create(null);
+  if (!lockfile.packages || typeof lockfile.packages !== 'object') return aliases;
+  for (const entry of Object.values(lockfile.packages)) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    for (const field of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+      const dependencies = entry[field];
+      if (!dependencies || typeof dependencies !== 'object' || Array.isArray(dependencies)) continue;
+      for (const [alias, specifier] of Object.entries(dependencies)) {
+        const target = npmAliasTarget(specifier);
+        if (target) aliases[alias] = target;
+      }
+    }
+  }
+  return aliases;
+}
+
 function validBase64(text) {
   for (let index = 0; index < text.length; index += 1) {
     const code = text.charCodeAt(index);
@@ -349,6 +383,7 @@ export function auditLockfile(input, options = {}) {
   }
 
   const packages = lockfile.packages;
+  const npmAliasTargets = collectNpmAliasTargets(lockfile);
   let packageCount = 0;
   const installScriptPaths = new Set();
   for (const packagePath of Object.keys(packages)) {
@@ -369,7 +404,8 @@ export function auditLockfile(input, options = {}) {
     if (packageName) {
       findings.push(...collectPackageNameFindings(packageName, 'packages.' + packagePath + '.packageName', policy));
     }
-    if (typeof entry.name === 'string' && packageName && entry.name !== packageName) {
+    const canonicalPackageName = typeof entry.name === 'string' && npmAliasTargets[packageName] === entry.name ? entry.name : packageName;
+    if (typeof entry.name === 'string' && packageName && entry.name !== packageName && npmAliasTargets[packageName] !== entry.name) {
       findings.push(makeFinding(
         SEMVERCAGE_FINDING_CODES.LOCKFILE_PACKAGE_NAME_MISMATCH,
         'high',
@@ -412,7 +448,7 @@ export function auditLockfile(input, options = {}) {
       ));
     }
     if (!localEntry) auditIntegrity(entry, packagePath, findings, policy);
-    const archive = inspectTarballUrl(parsedUrl, packageName);
+    const archive = inspectTarballUrl(parsedUrl, canonicalPackageName);
     if (archive.recognized && archive.packageMismatch) {
       findings.push(makeFinding(
         SEMVERCAGE_FINDING_CODES.LOCKFILE_PACKAGE_NAME_MISMATCH,

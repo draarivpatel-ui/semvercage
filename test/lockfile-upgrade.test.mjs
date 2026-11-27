@@ -455,6 +455,26 @@ test('legacy missing integrity is inconsistent with packages snapshot', () => {
   assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.LOCKFILE_MISSING_INTEGRITY, 'high'), true);
   assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.LOCKFILE_INTEGRITY_MISMATCH, 'high'), true);
 });
+test('npm alias lockfile representation does not false positive as package substitution', () => {
+  const report = auditLockfile(mutateValid((lockfile) => {
+    lockfile.packages[''].dependencies = { aliasdep: 'npm:sample-package@1.2.3' };
+    delete lockfile.packages['node_modules/sample-package'];
+    lockfile.packages['node_modules/aliasdep'] = {
+      name: 'sample-package',
+      version: '1.2.3',
+      resolved: 'https://registry.npmjs.org/sample-package/-/sample-package-1.2.3.tgz',
+      integrity: SHA512
+    };
+  }));
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.LOCKFILE_PACKAGE_NAME_MISMATCH), false);
+});
+test('unexplained package name mismatch remains a substitution finding', () => {
+  const report = auditLockfile(mutateValid((lockfile) => {
+    lockfile.packages['node_modules/sample-package'].name = 'evil-package';
+  }));
+  assert.equal(hasFinding(report, SEMVERCAGE_FINDING_CODES.LOCKFILE_PACKAGE_NAME_MISMATCH, 'high'), true);
+});
+
 test('packages-only install script flag does not create a false undeclared mismatch', () => {
   const report = auditLockfile(mutateValid((lockfile) => {
     lockfile.lockfileVersion = 2;
